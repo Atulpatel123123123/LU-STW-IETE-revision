@@ -1,0 +1,248 @@
+<user_query>
+Reviewer 1(Bottom line
+
+The draft is much stronger than an early manuscript: the paper has a clear proposed method, a coherent three-phase LU-STW pipeline, proper tables, ablation, significance testing, limitations, and a complete reference list. However, it is not yet submission-ready for a strong journal. The biggest risks are novelty positioning, methodological defensibility, baseline fairness, statistical interpretation, writing polish, and a few technical inconsistencies. The paper can become publishable, but it needs one focused revision pass before submission.  ￼
+
+⸻
+
+What is good
+
+The paper’s core idea is understandable: train separate source/target MF models, align latent dimensions with the Hungarian algorithm, then fine-tune the target model using user-specific confidence weights. This is easy to explain and the workflow is presented consistently in the abstract, introduction, methodology, algorithms, and conclusion.
+
+The draft also does a good job clarifying that the setting is overlapping-user CDR, not general cold-start CDR. This is important because the method depends on users being present in both domains. The paper explicitly states that it does not solve target-only cold-start users, which makes the claim more defensible.
+
+The results section is reasonably complete. Tables 3 and 4 report MAE/RMSE across MovieLens, Yelp, and Amazon at 25%, 50%, and 75% training density. LU-STW is best in the reported point estimates, and the paper includes paired t-tests, Cohen’s d, and an ablation study. That is a good structure for a journal manuscript.
+
+The limitations section is also better than average. It honestly acknowledges overlapping-user dependence, linear MF limitation, fixed confidence weights, global rather than user-cluster-specific alignment, and manually selected domain pairs.
+
+⸻
+
+Major problems that must be fixed
+
+1. The novelty claim is still vulnerable
+
+The paper repeatedly claims that LU-STW is distinguished by combining Hungarian alignment with user-specific transfer weighting. That is plausible, but the related work does not yet prove the gap strongly enough.
+
+The closest method is MF-HNO3/MF-SNO3 from Do and Lauw, which also uses Hungarian/Sinkhorn-style matching. Your paper says they fine-tune uniformly and LU-STW personalizes fine-tuning. That distinction is important, but it needs a sharper paragraph explaining exactly:
+
+* what object they align versus what LU-STW aligns,
+* whether their method assumes overlapping-free, dual-target, or different CDR setting,
+* why their factor alignment cannot already be interpreted as user-specific weighting,
+* why LU-STW’s confidence score is not just a heuristic learning-rate trick.
+
+Right now, the paper says the distinction, but it does not defend it deeply enough. For a reviewer, this is the main novelty question.
+
+⸻
+
+2. The Hungarian-alignment theory is incomplete
+
+The method aligns latent dimensions by comparing columns of independently trained MF user matrices. But standard MF factors are not identifiable only up to permutation; they can also be affected by rotation, scaling, sign flips, and local optima. The paper briefly mentions rotation/permutation, but the proposed solution only handles permutation.
+
+This is a major methodological weakness. You need to add a defense such as:
+
+“Although MF latent spaces are generally rotation-invariant, the use of identical factor dimensionality, biased MF, regularization, SGD initialization protocol, and column-wise cosine matching provides a practical permutation-based alignment approximation. LU-STW does not claim to solve arbitrary orthogonal Procrustes alignment; instead, it tests whether a constrained one-to-one dimension permutation is sufficient to improve transfer under overlapping-user CDR.”
+
+Even better, add an ablation comparing:
+
+* no alignment,
+* Hungarian permutation,
+* orthogonal Procrustes alignment,
+* maybe random permutation.
+
+Without this, a strong reviewer may say the alignment assumption is under-justified.
+
+⸻
+
+3. The confidence score can become negative but is handled awkwardly
+
+Equation 3 uses cosine similarity and then max(ε, cosine). Since cosine can be negative, negative-transfer users are all collapsed to ε. That is defensible, but it is crude. You should explain why clipping is chosen instead of rescaling cosine to [0,1], sigmoid mapping, or softmax/temperature scaling.
+
+Also, if ωu scales the learning rate, then very high cosine means larger updates. But larger updates do not necessarily mean “more source transfer”; they also mean more aggressive target adaptation. The language should be corrected. The source transfer mainly happens through initialization; confidence-weighting controls the degree of target-side adaptation after transferred initialization, not simply “influence of source knowledge.”
+
+⸻
+
+4. Baseline fairness needs more detail
+
+The baseline section is useful but still not enough for journal review. Some baselines appear much weaker than expected, especially CDRS-GCN on Yelp/Amazon and MF-SNO3 on Amazon. The paper explains that sparse graph connectivity may hurt CDRS-GCN, but reviewers may still ask whether it was fairly tuned.
+
+You should add a compact reproducibility table with:
+
+Model	Latent dim/grid	Learning rate/grid	Epochs	Early stopping	Regularization	Validation selection
+
+This will protect the paper from the criticism that LU-STW had more tuning than baselines.
+
+Also, NNDSVD is described as an initialization baseline with fixed rank 10, while LU-STW and MF-combine use {10,20,30}. That is not fully fair. Either tune NNDSVD over the same grid or explicitly justify why it is fixed.
+
+⸻
+
+5. Statistical testing is overclaimed in places
+
+The paper correctly admits uncorrected p-values and multiple comparisons. That is good. But the abstract says “paired t-tests confirming statistical significance on the majority of comparisons,” which is safe but weak. In the results discussion, avoid implying universal significance.
+
+For Amazon, several RMSE gains are not significant. For Yelp, several RMSE comparisons are also not significant. The conclusion should say:
+
+“Statistical support is strongest on MovieLens and MAE-based comparisons; RMSE significance is weaker on sparse Yelp/Amazon folds.”
+
+That honesty will improve credibility.
+
+⸻
+
+6. Dataset protocol needs tightening
+
+The datasets are described, but the exact splitting protocol is still ambiguous.
+
+The paper says observed target ratings were partitioned into training and test subsets at 25%, 50%, and 75% training density with 5-fold CV. This needs clarification:
+
+* Is the source matrix always fully used?
+* Is target validation separated from train/test?
+* Does each fold use the same source data?
+* Are splits user-stratified?
+* Are all users guaranteed to have target train and test ratings?
+* Are source/target interactions disjoint by domain only, or can genre overlap in MovieLens create duplicated ratings across Romance and Drama for the same movie?
+
+The MovieLens genre split is especially risky because movies can belong to multiple genres. A movie tagged both Romance and Drama may appear in both source and target unless explicitly removed. If this was handled, state it clearly. If not handled, it is a leakage risk.
+
+⸻
+
+Specific technical inconsistencies
+
+The title says “Confidence-Aware Learning of User-Specific Transfer Weights”, but the acronym is LU-STW, “Learning User-Specific Transfer Weights.” That is acceptable, but you should make the naming consistent.
+
+The author list still shows Atul Patel on page 1. Based on your prior project context, you often needed author-name changes to Pankaj Adiley. Check whether this draft has the correct author list before submission.
+
+The abstract says LU-STW reduces MovieLens 75% RMSE by approximately 3.2% relative to MF-combine. From Table 4: MF-combine = 0.9338, LU-STW = 0.8877. The relative reduction is approximately (0.9338 - 0.8877) / 0.9338 = 4.94%, not 3.2%. The 3.2% figure is closer to another comparison, possibly 25% training. This must be corrected.
+
+Table 5 says “p-values less than 0.05 are marked in bold,” but in the parsed text no bolding is visible. Make sure the compiled PDF actually bolds significant p-values.
+
+The reference for the Hungarian algorithm looks wrong. Reference [32] is titled “Language variativity and contact variants in the Hungarian and international literature,” which is not the classical Hungarian algorithm source. This is a serious citation problem. You should cite Kuhn’s 1955 Hungarian method paper and/or Munkres 1957 assignment algorithm, not a language-variability paper.
+
+The paper cites many 2025 references. That is acceptable only if all are real, accessible, and correctly formatted. Verify every 2025 reference carefully before submission.
+
+⸻
+
+Figure and table review
+
+Figure 1 is useful but visually crowded. The figure communicates the three phases, but it has too much small notation and many arrows. For journal submission, simplify it into three horizontal blocks:
+
+1. Independent source/target MF
+2. Hungarian latent-dimension alignment
+3. Confidence-weighted target fine-tuning
+
+Figures 2 and 3 explain the Hungarian algorithm, but they are too generic and tutorial-like. In a research paper, reviewers may see them as unnecessary. Either replace them with one LU-STW-specific alignment illustration or move the detailed Hungarian explanation to appendix/supplementary material.
+
+Figure 6 is important, but the current PDF rendering is small. If this is the main comparative visualization, make sure labels, legends, and dataset panels are readable at journal print size.
+
+Table 1 is useful but needs revision. It mixes classical RS surveys, SVD initialization, the Hungarian algorithm, and CDR methods in one table. This makes the related-work comparison look unfocused. Better split it into:
+
+* General RS/MF foundations in text only.
+* A CDR comparison table focused on transfer setting, alignment mechanism, personalization, and limitation.
+
+⸻
+
+Writing and language issues
+
+The writing is understandable but still has several non-native or inflated phrases. Examples:
+
+“RS are considered solutions for the information overload issue”
+Better: “Recommender systems address information overload in domains such as e-commerce, entertainment, and social media.”
+
+“Afterward, in RS, some models often rely…”
+This sentence is awkward and should be rewritten.
+
+“Figures 2 and 3 show the basic principles…”
+Too tutorial-like. Say: “Figures 2 and 3 illustrate the assignment procedure used in Phase 2.”
+
+Also avoid repeated phrases like “global semantic coordinate system” too many times. It is central, but overuse makes the manuscript sound repetitive.
+
+⸻
+
+What I would do next
+
+Before submission, do one revision pass with these priorities:
+
+1. Correct the RMSE improvement percentage in abstract/conclusion.
+2. Replace the incorrect Hungarian algorithm citation.
+3. Strengthen novelty against MF-HNO3/MF-SNO3.
+4. Clarify the splitting protocol and MovieLens genre-overlap issue.
+5. Add a baseline hyperparameter/reproducibility table.
+6. Rework Table 1 into a CDR-focused comparison table.
+7. Simplify or move Figures 2–3.
+8. Add a short defense of permutation-only alignment despite MF rotational ambiguity.
+9. Moderate claims about statistical significance, especially for Amazon/Yelp RMSE.
+10. Polish language throughout.
+
+My assessment: technically promising, structurally complete, but not yet safe for submission without targeted corrections. The most dangerous issues are the wrong Hungarian citation, unclear alignment assumption, possible MovieLens genre leakage, and incorrect 3.2% improvement claim.), reviwer 2(## Paper review: LU-STW (Elsevier `elsarticle`)
+
+Overall this is a **solid, submission-ready draft** with a clear three-phase story, honest limitations, and experiments that mostly match the claims. Below is a reviewer-style pass: what works, what will draw criticism, and what to fix before submission.
+
+---
+
+### Strengths
+
+1. **Contribution is clear** — Hungarian alignment on latent *dimensions* plus per-user \(\omega_u\) is well separated from MF-HNO3/SNO3 (combined matrix + uniform fine-tuning).
+2. **Scope is honest** — Overlapping users only; cold-start and overlap-free cases are acknowledged in intro, limitations, and future work.
+3. **Experiments are structured** — Same splits/seeds, 5-fold CV, three densities, nine baselines, significance tables, and ablations that isolate each phase.
+4. **Statistics are partly transparent** — One-sided paired \(t\)-tests, Cohen’s \(d\), and explicit note that many Amazon/Yelp RMSE cells are not significant at \(\alpha=0.05\) without correction; abstract’s “majority” is reasonable.
+5. **Ablation narrative is strong** — Especially the Yelp explanation (w/o Fine-Tuning ≈ Target Only) and why \(\omega_u\) must follow alignment.
+
+---
+
+### Critical issues (fix before submission)
+
+| Issue | Why it matters |
+|--------|----------------|
+| **Table 1 vs. text on Do & Lauw** | In Table~\ref{tab:comparative_analysis_mixed_order}, the weakness says “no shared users or items,” but the body and setup use **MF-HNO3/MF-SNO3 as overlapping-user OT baselines**. Reviewers will flag this as contradictory. Rewrite that row for the **overlapping-user** variant you actually implement. |
+| **`\journal{Nuclear Physics B}`** | Obvious template placeholder. Set the real target journal. |
+| **“~3.2% RMSE” (abstract & conclusion)** | At MovieLens 75%, RMSE: MF-combine \(0.9338\) → LU-STW \(0.8877\). Relative drop \(\approx (0.9338-0.8877)/0.9338 \approx 4.9\%\), not 3.2%. Recompute or correct everywhere. |
+| **Fairness vs. MF-HNO3** | LU-STW/MF-combine/MF-mapping search \(f \in \{10,20,30\}\); MF-HNO3/SNO3 use **fixed \(f=20\)**. Add a sentence that this follows the cited paper, or add a tuned-\(f\) row / appendix — otherwise “strongest baseline” claims may be challenged. |
+| **Code availability** | “Upon reasonable request” is weak for Elsevier/reproducibility. Prefer a public repo + commit hash before review. |
+
+---
+
+### Technical / scientific notes
+
+- **Alignment cost** uses cosine dissimilarity between **columns** of \(U^S, U^T\) — correct for dimension matching; say once explicitly that this is **not** user–user matching (you mostly do, but a short equation-level remark helps).
+- **\(\omega_u\) frozen** during Phase 3 — you state this; reviewers may ask for a dynamic-\(\omega\) ablation (you already list it in future work).
+- **Init \(b_u\) from source** — briefly justify (denser source ratings) with one sentence or a small ablation footnote.
+- **CDRS-GCN** on Yelp/Amazon (MAE \(\sim 1.4\)) — you explain sparsity; some reviewers may still call it a weak baseline. Keep the explanation; optional: report a lighter graph baseline or drop from main table and move to appendix.
+- **Multiple testing** — You mention Bonferroni but do not report adjusted \(p\)-values. Either add Holm–Bonferroni (or FDR) for one metric/dataset, or state clearly that results are exploratory for Yelp/Amazon RMSE.
+
+---
+
+### Writing & structure
+
+- **Related work (Sec. 2)** is long and overlaps the introduction; tighten by ~30% and move generic RS history to 1–2 paragraphs.
+- **Repetition** — “global alignment before user-specific weighting” appears in intro, Phase 2, Phase 3, and ablation; keep one tight block in methodology and shorten elsewhere.
+- **Notation** — Mix of \(k\) and \(f\) for latent rank; pick one symbol in methods/experiments.
+- **Minor language** — e.g. “Result analysis” → “Results analysis”; “Summarization” → “Summary”; consistent “cross-domain recommendation system(s).”
+
+---
+
+### LaTeX / production (quick cleanup)
+
+- Remove **duplicate** `\usepackage` (`inputenc`, `booktabs`, `mathrsfs`).
+- **Conflicting** `fontenc`: `T2A` + `T1` + `[russian,english]{babel}` — for an English paper use `T1` + `english` only.
+- Delete **Hindi/garbled comments** in figure environments (e.g. around `fig:framework`).
+- Hungarian row in Table 1: “Is transfer learning applied = No” is confusing when your method *uses* Hungarian *for* transfer — reframe as “algorithm component” not standalone “model.”
+- Consider `preprint` or `[review]` until camera-ready; `[h!]` floats may still fight two-column layout (you already use `dblfloatfix` / `stfloats` — good).
+
+---
+
+### What reviewers will likely accept
+
+- Novelty is **incremental but well argued**: optimal 1:1 dimension match + user-specific LR scaling in overlapping-user MF-CDR.
+- MovieLens results + ablations support the mechanism.
+- Limitations section is credible and not oversold.
+
+---
+
+### Suggested priority edits
+
+1. Fix Table 1 (Do & Lauw row) and **3.2% → verified %**.
+2. Set correct `\journal{...}` and clean preamble.
+3. One paragraph on **baseline fairness** (\(f\) grid vs. fixed 20).
+4. Public **code/data** statement.
+5. Shorten Related Work; unify \(k\) / \(f\).
+
+If you want, I can apply these edits directly in `69709ed1fdf4396e125939b4\elsarticle-template-num.tex` (Table 1, abstract %, preamble, and Table 1 Hungarian row).) ye sab thik kro mere  tex file me , or Format change mat krna ,  chahye to step bana lo sabke then  ak ak krke kro or har step ko krne ke bad push krna then puchna next step ke liye 
+</user_query>
