@@ -40,27 +40,55 @@ def orthogonal_procrustes(U_s, U_t):
 
 
 def fine_tune_es_rev(X, V, bu, bi, mu, R_tr, R_val, U_s_al, U_t, epochs, eta, l_uv, l_bi,
-                     use_conf=True, user_only=False, eps=0.05, patience=10, md=1e-4):
+                     use_conf=True, user_only=False, eps=0.05, patience=10, md=1e-4,
+                     rank_aware=False, bpr_weight=0.5, rel_thresh=4.0, n_bpr=1):
+    """If rank_aware: upweight high ratings + BPR pairs (pos r>=thresh vs unobserved)."""
     X, V, bu, bi = X.copy(), V.copy(), bu.copy(), bi.copy()
     conf = user_conf(U_s_al, U_t, eps) if use_conf else np.ones(X.shape[0])
     us, is_ = R_tr.nonzero()
     rs = R_tr[us, is_]
+    m, n = R_tr.shape
+    # per-user positives for BPR
+    pos = {u: is_[us == u][rs[us == u] >= rel_thresh] for u in np.unique(us)}
     best_rmse, wait = np.inf, 0
     bX = bV = bbu = bbi = None
+    rng = np.random.RandomState(0)
     for _ in range(epochs):
         idx = np.arange(len(rs))
-        np.random.shuffle(idx)
+        rng.shuffle(idx)
         for j in idx:
             u, i, r = us[j], is_[j], rs[j]
             eu = eta * conf[u]
             ei = eu if not user_only else eta
+            w = (1.0 + max(0.0, r - 3.0)) if rank_aware else 1.0
             pred = mu + bu[u] + bi[i] + X[u] @ V[i]
-            e = r - pred
+            e = w * (r - pred)
             bu[u] += eu * (e - l_bi * bu[u])
             bi[i] += ei * (e - l_bi * bi[i])
             xo, vo = X[u].copy(), V[i].copy()
             X[u] += eu * (e * vo - l_uv * xo)
             V[i] += ei * (e * xo - l_uv * vo)
+
+            if rank_aware and len(pos.get(u, [])) > 0:
+                for _b in range(n_bpr):
+                    i_pos = int(rng.choice(pos[u]))
+                    i_neg = int(rng.randint(0, n))
+                    if R_tr[u, i_neg] > 0:
+                        continue
+                    s_pos = mu + bu[u] + bi[i_pos] + X[u] @ V[i_pos]
+                    s_neg = mu + bu[u] + bi[i_neg] + X[u] @ V[i_neg]
+                    # logistic BPR grad
+                    x = s_pos - s_neg
+                    sig = 1.0 / (1.0 + np.exp(min(20, max(-20, x))))
+                    g = bpr_weight * eu * sig
+                    # update user + both items
+                    X[u] += g * (V[i_pos] - V[i_neg]) - eu * l_uv * X[u]
+                    V[i_pos] += g * X[u] - ei * l_uv * V[i_pos]
+                    V[i_neg] -= g * X[u] + ei * l_uv * V[i_neg]
+                    bu[u] += g
+                    bi[i_pos] += g
+                    bi[i_neg] -= g
+
         _, rmse = eval_pred(X @ V.T + mu + bu[:, None] + bi[None, :], R_val)
         if rmse < best_rmse - md:
             best_rmse, wait = rmse, 0
@@ -75,7 +103,7 @@ def fine_tune_es_rev(X, V, bu, bi, mu, R_tr, R_val, U_s_al, U_t, epochs, eta, l_
 
 
 def run_variant(R_s, R_tr, R_val, align="hungarian", use_conf=True, user_only=False,
-                use_source=True, use_ft=True, hp=HP):
+                use_source=True, use_ft=True, hp=HP, rank_aware=False, bpr_weight=0.5):
     t0 = time.time()
     if not use_source:
         out = mf_sgd_es(R_tr, R_val, hp["F"], hp["EPOCHS"], hp["ETA"], hp["l_uv"], hp["l_bi"])
@@ -101,7 +129,8 @@ def run_variant(R_s, R_tr, R_val, align="hungarian", use_conf=True, user_only=Fa
         X, Vf, buf, bif, conf = fine_tune_es_rev(
             U_al, V_t, bu_s, bi_t, mu_t, R_tr, R_val, U_al, U_t,
             hp["EPOCHS_FT"], hp["ETA_P"], hp["l_uvp"], hp["l_bip"],
-            use_conf=use_conf, user_only=user_only)
+            use_conf=use_conf, user_only=user_only,
+            rank_aware=rank_aware, bpr_weight=bpr_weight)
         R_hat = X @ Vf.T + mu_t + buf[:, None] + bif[None, :]
     else:
         conf = user_conf(U_al, U_t)

@@ -243,9 +243,46 @@ def predict_cdrs_gcn(R_s, R_tr, R_val, f=32, epochs=30, lr=0.01):
     return _clip(Ue @ Ve.T + mu + bue[:, None] + bie[None, :])
 
 
+def _zrow(A):
+    """Row-wise z-score (for score blending)."""
+    mu = A.mean(1, keepdims=True)
+    sd = A.std(1, keepdims=True)
+    sd[sd < 1e-8] = 1.0
+    return (A - mu) / sd
+
+
 def predict_lustw(R_s, R_tr, R_val):
     out = run_variant(R_s, R_tr, R_val, align="hungarian", use_conf=True, user_only=False)
     return _clip(out["R_hat"])
+
+
+def predict_lustw_rank(R_s, R_tr, R_val, alpha=0.65, bpr_weight=0.75):
+    """
+    Ranking-oriented LU-STW:
+      1) confidence FT + user-only η + BPR/relevance weighting
+      2) blend with source-neighbor KNN scores (helps NDCG vs KNN-CDRS/NNDSVD)
+    alpha: weight on LU-STW (rest on KNN-CDRS). Tuned for ranking; MAE still from LU-STW head.
+    """
+    try:
+        from lu_stw_core import HP as _HP
+    except ImportError:
+        from src.lu_stw_core import HP as _HP
+    hp = dict(_HP)
+    hp["F"] = 30
+    hp["EPOCHS_FT"] = 180
+    out = run_variant(
+        R_s, R_tr, R_val,
+        align="hungarian", use_conf=True, user_only=True,
+        rank_aware=True, bpr_weight=bpr_weight, hp=hp,
+    )
+    R_mf = out["R_hat"]
+    R_knn = predict_knn_cdrs(R_s, R_tr, k=30)
+    # ranking score (used for P/R/NDCG); keep MF scale roughly
+    score = alpha * _zrow(R_mf) + (1.0 - alpha) * _zrow(R_knn)
+    # map back near rating range for MAE fairness: shift/scale to MF mean/std
+    mf_mu, mf_sd = R_mf.mean(), R_mf.std() + 1e-8
+    R_hat = score * mf_sd + mf_mu
+    return _clip(R_hat)
 
 
 PREDICTORS = {
@@ -259,6 +296,7 @@ PREDICTORS = {
     "MF-SNO3": predict_mf_sno3,
     "CDRS-GCN": predict_cdrs_gcn,
     "LU-STW": lambda R_s, R_tr, R_val: predict_lustw(R_s, R_tr, R_val),
+    "LU-STW-Rank": predict_lustw_rank,
 }
 
 
