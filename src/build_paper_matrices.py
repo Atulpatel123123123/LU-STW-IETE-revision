@@ -9,10 +9,13 @@ import pandas as pd
 
 
 def _gdown(file_id, dest):
-    if os.path.exists(dest) and os.path.getsize(dest) > 0:
+    if os.path.exists(dest) and os.path.getsize(dest) > 1000:
         print("exists", dest)
         return dest
-    subprocess.check_call(["gdown", "--id", file_id, "-O", dest])
+    if os.path.exists(dest):
+        os.remove(dest)
+    url = "https://drive.google.com/uc?id=" + file_id
+    subprocess.check_call(["gdown", url, "-O", dest])
     return dest
 
 
